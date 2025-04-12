@@ -1,0 +1,33 @@
+from compute import computeInstanceImageOlderThanAllowed
+
+# Your other imports
+# from your_module import check_age, INSTANCE_AGE_LIMIT, IMAGE_AGE_LIMIT
+
+# Your constants
+INSTANCE_AGE_LIMIT = 30  # Example: days
+IMAGE_AGE_LIMIT = 30  # Example: days
+
+def main():
+    compute_checker = computeInstanceImageOlderThanAllowed(project_id="your-project-id")
+    details = compute_checker.get_details()
+
+    if not details:
+        print("No instances to process. Exiting.")
+    else:
+        violations = []
+        for instance in details:
+            if check_age(instance["instance_creation_time"], INSTANCE_AGE_LIMIT, "instance"):
+                instance_id = instance["instance_id"]
+                for disk in instance["disks"]:
+                    if check_age(disk["image_creation_time"], IMAGE_AGE_LIMIT, "image"):
+                        violation_id = f"{instance_id}_{disk['image_id']}"
+                        violations.append(violation_id)
+
+        if violations:
+            print("Violations found:", violations)
+            # Proceed to next step
+        else:
+            print("No violations found.")
+
+if __name__ == "__main__":
+    main()
