@@ -1,13 +1,28 @@
-checker = computeInstanceImageOlderThanAllowed(project_id)
-details = checker.get_details()
+from config import ALERT_FOR_VIOLATIONS
+import json
 
-print("Executed successfully")
+# Scanner class for the violation
+from computeInstanceOlder import ComputeInstanceImageOlderThanAllowedScanner
 
-if not details:
-    print("No instances to process. Exiting.")
-else:
-    print("\nOther instance details:")
-    print(json.dumps(details, indent=4))
+def main():
+    # Loop through all violations in ALERT_FOR_VIOLATIONS
+    for violation_type, projects in ALERT_FOR_VIOLATIONS.items():
+        # For each violation, decide what scanner to use
+        if violation_type == "computeInstanceImageOlderThanAllowed":
+            scanner_class = ComputeInstanceImageOlderThanAllowedScanner
+        
+        # For each project associated with this violation
+        for project_id in projects:
+            # Initialize the scanner for the given project
+            scanner = scanner_class(project_id)
+            details = scanner.get_details()
 
-    # Get and print violations
-    checker.get_violations(details, INSTANCE_AGE_LIMIT, IMAGE_AGE_LIMIT)
+            if not details:
+                print(f"No instances to process for project {project_id}.")
+                continue
+
+            print(f"\nProject Details for {project_id}:")
+            print(json.dumps(details, indent=4))
+
+            # Process violations for this project
+            scanner.get_violations(details)
