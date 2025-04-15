@@ -1,5 +1,35 @@
 # python
 basics of python
+def process_violations(self, project_id, violations):
+    print("processing computeInstance ImageOlderThanAllowed violation...")
+    violation_name = "computeInstance ImageOlderThanAllowed"
+    v_ids = []
+
+    # Check once if any violation already exists
+    existing_ticket_check = any(
+        ticket_exists_in_bq(violation_name, project_id, v["violation_id"])
+        for v in violations
+    )
+
+    if existing_ticket_check:
+        print(f"Ticket already exists for project {project_id} and violation {violation_name}")
+        return
+
+    # No ticket exists, proceed
+    owner, participants = get_project_owners(project_id, PROJECT_OWNERS)
+    ticket_id = self.create_ticket(project_id, violations, owner, participants)
+
+    for violation in violations:
+        v_ids.append({
+            "violation_id": violation["violation_id"],
+            "project_id": project_id,
+            "sreops_ticket_id": ticket_id,
+            "added_on": datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'),
+            "owner": owner,
+            "violation_name": violation_name
+        })
+
+    insert_rows_into_bq(v_ids)
 class computeInstanceImageOlderThanAllowed:
 
     def __init__(self, project_id):
