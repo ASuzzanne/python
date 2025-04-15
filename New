@@ -1,17 +1,18 @@
+from google.cloud import compute_v1
 from config import *
 from common import *
-from google.cloud import bigquery, compute_v1
 
 class computeInstanceImageOlderThanAllowed:
+    def __init__(self):
+        print("Successfully initialized")
 
-    def __init__(self, project_id):
-        self.project_id = project_id
-        print("successfully initialized")
-
-    def get_details(self):
+    def get_details(self, project_id):
         try:
-            request = compute_v1.AggregatedListInstancesRequest(project=self.project_id)
+            # Initialize Compute Engine client
+            instance_client = compute_v1.InstancesClient()
+            request = compute_v1.AggregatedListInstancesRequest(project=project_id)
             response = instance_client.aggregated_list(request=request)
+
             found_instances = False
             details = []
 
@@ -19,73 +20,198 @@ class computeInstanceImageOlderThanAllowed:
                 if instances_scoped_list.instances:
                     found_instances = True
                     zone = zone.split('/')[-1]
+
                     for instance in instances_scoped_list.instances:
                         instance_data = {
+                            "project_name": project_id,
                             "instance_name": instance.name,
                             "instance_id": str(instance.id),
                             "instance_creation_time": instance.creation_timestamp,
                             "disks": []
                         }
+
                         for disk in instance.disks:
                             if disk.boot and disk.source:
                                 try:
                                     disk_name = disk.source.split('/')[-1]
                                     if '/regions/' in disk.source:
                                         region = disk.source.split('/regions/')[-1].split('/')[0]
-                                        disk_info = regional_disk_client.get(project=self.project_id, disk=disk_name)
+                                        disk_info = instance_client.get(project=project_id, region=region, disk=disk_name)
                                     else:
-                                        disk_info = disk_client.get(project=self.project_id, zone=zone, disk=disk_name)
+                                        disk_info = instance_client.get(project=project_id, zone=zone, disk=disk_name)
+
                                     source_image = getattr(disk_info, "source_image", None)
-                                    if source_image:
-                                        image_name = source_image.split('/')[-1]
-                                        image_info = image_client.get(project=self.project_id, image=image_name)
-                                        disk_data = {
-                                            "disk_name": disk.device_name,
-                                            "disk_creation_time": disk_info.creation_timestamp,
-                                            "image_name": image_name,
-                                            "image_id": str(image_info.id),
-                                            "image_creation_time": image_info.creation_timestamp
-                                        }
-                                        instance_data["disks"].append(disk_data)
+                                    if not source_image:
+                                        continue
+
+                                    image_name = source_image.split('/')[-1]
+                                    image_client = compute_v1.ImagesClient()
+                                    image_info = image_client.get(project=project_id, image=image_name)
+
+                                    disk_data = {
+                                        "disk_name": disk.device_name,
+                                        "disk_creation_time": disk_info.creation_timestamp,
+                                        "image_name": image_name,
+                                        "image_id": str(image_info.id),
+                                        "image_creation_time": image_info.creation_timestamp
+                                    }
+
+                                    instance_data["disks"].append(disk_data)
+
                                 except Exception as e:
-                                    print("Error fetching disk or image info:", str(e))
+                                    print(f"Error fetching disk or image info: {str(e)}")
+
                         details.append(instance_data)
 
             if not found_instances:
-                print("No instances found")
+                print(f"No instances found for project {project_id}")
+                return None
+
             return details
 
         except Exception as e:
-            print("Error fetching instance details:", str(e))
-            return []
+            print(f"Error fetching instance details: {str(e)}")
+            return None
 
-    def get_violations(self, details, instance_age_limit, image_age_limit):
+    def get_violations(self, details):
+        violations = []
         violation_details = []
 
-        for detail in details:
-            instance_creation_time = parse_rfc3339(detail["instance_creation_time"])
-            disk_creation_time = parse_rfc3339(detail["disk_creation_time"])
-            image_creation_time = parse_rfc3339(detail["image_creation_time"])
+        for instance in details:
+            if check_age(instance["instance_creation_time"], INSTANCE_AGE_LIMIT, "instance"):
+                violation_id = instance["instance_id"]
 
-            if (instance_creation_time <= instance_age_limit or
-                    disk_creation_time <= image_age_limit or
-                    image_creation_time <= image_age_limit):
-                violation = {
-                    "violation_id": f"{detail['instance_id']}-{detail['disk_name']}",
-                    "instance_name": detail["instance_name"],
-                    "instance_id": detail["instance_id"],
-                    "image_name": detail["image_name"],
-                    "image_id": detail["image_id"]
-                }
-                violation_details.append(violation)
+                for disk in instance["disks"]:
+                    if check_age(disk["image_creation_time"], IMAGE_AGE_LIMIT, "image"):
+                        violation_data = {
+                            "violation_id": violation_id,
+                            "instance_name": instance["instance_name"],
+                            "instance_id": instance["instance_id"],
+                            "image_name": disk["image_name"],
+                            "image_id": disk["image_id"]
+                        }
+                        violation_details.append(violation_data)
+                        violations.append(violation_id)
 
-        if violation_details:
-            print("\nViolations found:")
+        if violations:
+            print(f"\nViolations found: {violations}")
             for violation in violation_details:
-                print(f"\nViolation details: {{")
-                print(f"violation id: {violation['violation_id']}")
-                print(f"instance name: {violation['instance_name']}, instance id: {violation['instance_id']}")
-                print(f"image name: {violation['image_name']}, image id: {violation['image_id']}")
-                print(f"}}")
+                print(json.dumps(violation, indent=4))
         else:
             print("No violations found.")
+
+        return violation_details
+
+    def process_violations(self, project_id, violations):
+        print("Processing computeInstanceImageOlderThanAllowed violation...")
+        violation_name = "computeInstanceImageOlderThanAllowed"
+        v_ids = []
+        tickets_to_create = {}
+
+        for violation in violations:
+            instance_id = violation.get("instance_id")
+
+            if not ticket_exists_in_bq(violation_name, project_id, instance_id):
+                if project_id not in tickets_to_create:
+                    tickets_to_create[project_id] = []
+                tickets_to_create[project_id].append(violation)
+
+                v_ids.append({
+                    "violation_name": violation_name,
+                    "project": project_id,
+                    "owner": "owner",  # Adjust this with the actual owner logic
+                    "added_on": datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f'),
+                    "violation_id": instance_id
+                })
+
+        for project, violations in tickets_to_create.items():
+            print(f"Creating ticket for violation {violation_name}")
+            ticket_id = self.create_ticket(violations)
+            print(ticket_id)
+
+            for violation in v_ids:
+                if violation["project"] == project_id:
+                    violation["sreops_ticket_id"] = ticket_id
+
+            insert_rows_into_bq(v_ids)
+
+    def create_ticket(self, violations):
+        print("Creating ticket...")
+        violation_list_str = "\n-".join([str(violation) for violation in violations])
+
+        ticket_details = {
+            "summary": f"computeInstance ImageOlderThanAllowed",
+            "description": f"Hi, you will soon have computeInstance ImageOlderThanAllowed violation on the project\n\nDetails:\n-{violation_list_str}",
+            "customfield_36100": "project_id",  # Replace with actual project key
+            "customfield_31900": "P3",  # Priority, adjust as needed
+        }
+
+        ticket_id = raise_ticket(ticket_details, "owner")  # Adjust this logic to match your system
+        print(f"Ticket ID: {ticket_id}")
+        return ticket_id
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+from datetime import datetime
+import json
+from config import *
+from common import *
+from computeInstanceOlder import *
+from google.cloud import bigquery
+
+def main():
+    try:
+        for violation_type, projects in ALERT_FOR_VIOLATIONS.items():
+            if violation_type == "computeInstanceImageOlderThanAllowed":
+                # For each project associated with this violation
+                for project_id in projects:
+                    # Initialize the scanner for the given project
+                    scanner_class = computeInstanceImageOlderThanAllowed()
+                    details = scanner_class.get_details(project_id)
+
+                    if not details:
+                        print(f"No instances to process for project {project_id}.")
+                        continue
+
+                    print(f"\nProject Details for {project_id}:")
+                    print(json.dumps(details, indent=4))
+
+                    # Process violations for this project
+                    violations = scanner_class.get_violations(details)
+                    
+                    if violations:
+                        print(f"\nViolations found for project {project_id}:")
+                        for violation in violations:
+                            print(json.dumps(violation, indent=4))
+
+                        # Process and create tickets for violations
+                        scanner_class.process_violations(project_id, violations)
+                    else:
+                        print(f"No violations found for project {project_id}.")
+                
+    except Exception as e:
+        print(f"Error in main execution: {str(e)}")
+
+
+if __name__ == "__main__":
+    main()
+----------------------------------------------------------------------------------------------------------------------------------------
+def insert_rows_into_bq(violations):
+    rows_to_insert = []
+    for violation in violations:
+        row = {
+            "violation_id": violation["instance_id"],  # Store only instance_id
+            "project_id": violation["project_id"],
+            "sreops_ticket_id": violation.get("sreops_ticket_id", None),
+            "added_on": violation["added_on"],
+            "owner": violation.get("owner", None),
+            "violation_name": violation["violation_name"]
+        }
+        rows_to_insert.append(row)
+
+    client = bigquery.Client()
+    table_ref = client.dataset('your_dataset_id').table('your_table_name')
+    errors = client.insert_rows_json(table_ref, rows_to_insert)  # Insert rows
+
+    if errors:
+        print(f"Errors occurred: {errors}")
+    else:
+        print(f"Successfully inserted {len(rows_to_insert)} rows.")
