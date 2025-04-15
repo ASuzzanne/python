@@ -1,3 +1,31 @@
+def create_ticket(self, project_id, violations, owner, participants):
+    print("creating ticket...")
+
+    # Format each violation detail
+    violation_list_str = "\n\n".join([
+        f"""**ID:** {v.get("id")}
+**Parent:** {v.get("parent")}
+**Name:** {v.get("name")}
+**First Identified:** {v.get("first_identified")}
+**OverDue:** {v.get("overdue")}
+**Violation:** {v.get("violation")}"""
+        for v in violations
+    ])
+
+    ticket_details = {
+        "summary": f"test:computeInstance ImageOlderThanAllowed",
+        "description": f"""Hi, you will soon have computeInstance ImageOlderThanAllowed violation on **{project_id}** project.
+
+Details:
+
+{violation_list_str}""",
+        "customfield_36100": project_id,  # project key, mandatory
+        "customfield_31900": "P3",        # priority, mandatory
+    }
+
+    ticket_id = raise_ticket(ticket_details, owner, participants)
+    print(str(ticket_id))
+    return ticket_id
 # python
 basics of python
 def process_violations(self, project_id, violations):
