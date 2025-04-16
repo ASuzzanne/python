@@ -1,3 +1,17 @@
+violation_list_str = "\n\n".join([
+    f"""**Violation ID:** {v.get("violation_id", "N/A")}  
+**Violation Name:** {v.get("violation_name", "N/A")}  
+**Owner:** {v.get("owner", "N/A")}  
+**Instance ID:** {v.get("instance_id", "N/A")}  
+**Created On:** {v.get("instance_created_on", "N/A")}  
+**Days Old:** {v.get("instance_days_old", "N/A")}  
+**Image ID:** {v.get("image_id", "N/A")}  
+**Created On:** {v.get("image_created_on", "N/A")}  
+**Days Old:** {v.get("image_days_old", "N/A")}"""
+    for v in violations
+])
+
+
 def create_ticket(self, project_id, violations, owner, participants):
     print("creating ticket...")
 
