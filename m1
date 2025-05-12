@@ -1,3 +1,108 @@
+import json
+from config import jira_client, bq_client  # adjust import if needed
+
+def scan_image_age_tickets():
+    print("Scanning tickets for resolved image violations...")
+
+    query = (
+        'project = GCPSREOPS AND status in ("Waiting for support", "Waiting for Customer", Pending, "In Progress") '
+        'AND component = "GCP:PlatformViolations" AND summary ~ "ImageOlderThanAllowed"'
+    )
+    open_tickets = jira_client.search_issues(query)
+
+    if not open_tickets:
+        print("No open tickets found.")
+        return
+
+    id_ticket_map = {}
+    all_ticket_details = {}
+    ids_list = []
+
+    for ticket in open_tickets:
+        ticket_id = ticket.key
+        ticket_details = jira_client.issue(ticket_id)
+        ids_str = ticket_details.fields.customfield_26907
+
+        if not ids_str:
+            continue
+
+        ids = ids_str.strip().split("\n")
+        id_ticket_map[ticket_id] = ids
+        all_ticket_details[ticket_id] = ticket_details
+        ids_list.extend(ids)
+
+    if not ids_list:
+        print("No violation IDs found in tickets.")
+        return
+
+    # Query BQ for active violations
+    id_str = ",".join([f"'{i}'" for i in ids_list])
+    query = f"""
+        SELECT id FROM `your_project.dataset.totalviolationshds_v2`
+        WHERE id IN ({id_str}) AND active = TRUE AND controlId IS NULL
+    """
+    results = bq_client.query_and_wait(query=query)
+    active_violation_ids = [str(row.id) for row in results]
+
+    # Process each ticket
+    for ticket_id, ids in id_ticket_map.items():
+        print(f"Processing ticket {ticket_id}")
+        inactive_ids = []
+        pending = False
+
+        for v_id in ids:
+            if v_id not in active_violation_ids:
+                inactive_ids.append(v_id)
+            else:
+                pending = True
+
+        if inactive_ids:
+            ticket_details = all_ticket_details[ticket_id]
+            description = ticket_details.fields.description
+            ids_str = ticket_details.fields.customfield_26907
+
+            updated_description, updated_ids_str = strike_inactive_ids(description, ids_str, inactive_ids)
+
+            ticket_details.update(fields={
+                "description": updated_description,
+                "customfield_26907": updated_ids_str
+            })
+
+        if not pending:
+            print(f"Closing ticket {ticket_id}")
+            jira_client.add_comment(ticket_id, "All violations have been resolved. Closing the ticket.")
+            jira_client.transition_issue(ticket_id, "Resolve this issue", resolution={"name": "Done"})
+
+def strike_inactive_ids(description, ids_str, inactive_ids):
+    for v_id in inactive_ids:
+        start = description.find(v_id)
+        if start == -1:
+            continue
+        start -= 6  # Go back to start of separator
+        end = description.find("\u2013", start + 1)
+        if end == -1:
+            end = len(description)
+
+        old_block = description[start:end]
+        new_block = old_block.strip().replace("\n", "-\r\n-")
+        new_block = f"(color:#218845) RESOLVED (color)\r\n{new_block}"
+        description = description.replace(old_block, new_block)
+
+        ids_str = ids_str.replace(v_id + "\n", "").replace(v_id, "")
+
+    return description, ids_str
+
+# To run directly
+if __name__ == "__main__":
+    try:
+        scan_image_age_tickets()
+        print("ImageAge scanner completed.")
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+
+
 from config import ALERT_FOR_VIOLATIONS
 import json
 
