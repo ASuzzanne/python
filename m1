@@ -1,3 +1,130 @@
+from config import jira_client, bq_client, instance_client
+from google.cloud import compute_v1
+
+def instance_exists(project_id, instance_id):
+    print(f"Checking if instance {instance_id} exists in project {project_id}...")
+    request = compute_v1.AggregatedListInstancesRequest(project=project_id)
+    agg_list = instance_client.aggregated_list(request=request)
+
+    for zone, response in agg_list:
+        if response.instances:
+            for instance in response.instances:
+                if str(instance.id) == instance_id:
+                    print(f"Instance {instance_id} exists!")
+                    return True
+    print(f"Instance {instance_id} does not exist.")
+    return False
+
+def strike_inactive_ids(description, inactive_ids):
+    print(f"Striking inactive IDs: {inactive_ids}")
+    for vid in inactive_ids:
+        idx = description.find(vid)
+        if idx == -1:
+            continue
+        start = max(0, idx - 6)
+        end = description.find("–", idx)
+        if end == -1:
+            end = len(description)
+        old_description = description[start:end]
+        new_description = old_description.strip().replace("\n", "-\r\n-")
+        new_description = "*{color:#218845} RESOLVED{color}*\r\n-" + new_description + "-"
+        description = description.replace(old_description, new_description)
+    print(f"Updated description after striking inactive IDs: {description}")
+    return description
+
+def scan_open_tickets():
+    print("Scanning open tickets...")
+
+    query = (
+        'project = GCPSREOPS AND status in ("Waiting for support", "Waiting for Customer", Pending, "In Progress") '
+        'AND "Path to Green" is not EMPTY AND component = "gcp-platform-warnings"'
+    )
+
+    open_tickets = jira_client.search_issues(query)
+    if not open_tickets:
+        print("No open tickets found!")
+        return True
+
+    print(f"Found {len(open_tickets)} open tickets")
+
+    for ticket in open_tickets:
+        ticket_id = ticket.key
+        print(f"\nProcessing ticket: {ticket_id}")
+
+        details = jira_client.issue(ticket_id)
+        description = details.fields.description or ""
+        project_id_field = details.fields.customfield_36100
+
+        if not project_id_field:
+            print("Missing project ID, skipping ticket.")
+            continue
+
+        project_id = project_id_field.strip()
+
+        # Extract instance IDs from description
+        violation_ids = []
+        for line in description.splitlines():
+            if "Reference ID:" in line and "instance_" in line:
+                parts = line.strip().split()
+                for part in parts:
+                    if part.startswith("instance_") and part[9:].isdigit():
+                        violation_ids.append(part.strip())
+
+        if not violation_ids:
+            print("No valid instance IDs found in description, skipping ticket.")
+            continue
+
+        print(f"Extracted violation IDs: {violation_ids}")
+
+        inactive_ids = []
+        active_found = False
+
+        for vid in violation_ids:
+            try:
+                instance_id = vid.split("instance_")[1]
+                print(f"Checking instance: {instance_id}")
+                if not instance_exists(project_id, instance_id):
+                    print(f"Instance {instance_id} is inactive.")
+                    inactive_ids.append(vid)
+                else:
+                    print(f"Instance {instance_id} is active.")
+                    active_found = True
+            except Exception as e:
+                print(f"Skipping {vid} due to error: {e}")
+                continue
+
+        if inactive_ids:
+            print(f"Striking inactive IDs: {inactive_ids}")
+            updated_description = strike_inactive_ids(description, inactive_ids)
+
+            print(f"Updating ticket description with new struck inactive IDs...")
+            jira_client.issue(ticket_id).update(fields={
+                "description": updated_description
+            })
+
+        if not active_found:
+            print(f"Closing ticket {ticket_id} as all instances are resolved.")
+            jira_client.add_comment(ticket_id, "All violations resolved. Closing the ticket.")
+            jira_client.transition_issue(ticket_id, "Resolve this issue", resolution={"name": "Done"})
+
+    return True
+
+if __name__ == "__main__":
+    try:
+        scan_open_tickets()
+        print("\nGCPSREOPS-alerts-scanner = 0")
+    except Exception as e:
+        print(e)
+        print("GCPSREOPS-alerts-scanner = 1")
+
+
+
+
+
+
+
+
+
 
 from config import jira_client, bq_client, instance_client
 from google.cloud import compute_v1
