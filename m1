@@ -1,3 +1,106 @@
+from config import jira_client, bq_client, instance_client
+from google.cloud import compute_v1
+
+def instance_exists(project_id, instance_id):
+    request = compute_v1.AggregatedListInstancesRequest(project=project_id)
+    agg_list = instance_client.aggregated_list(request=request)
+
+    for zone, response in agg_list:
+        if response.instances:
+            for instance in response.instances:
+                if str(instance.id) == instance_id:
+                    return True
+    return False
+
+def strike_inactive_ids(description, ids_str, inactive_ids):
+    for vid in inactive_ids:
+        idx = description.find(vid)
+        if idx == -1:
+            continue
+        start = max(0, idx - 6)
+        end = description.find("–", idx)
+        if end == -1:
+            end = len(description)
+        old_description = description[start:end]
+        new_description = old_description.strip().replace("\n", "-\r\n-")
+        new_description = "*{color:#218845} RESOLVED{color}*\r\n-" + new_description + "-"
+        description = description.replace(old_description, new_description)
+        ids_str = ids_str.replace(vid + "\n", "").replace(vid, "")
+    return description, ids_str
+
+def scan_open_tickets():
+    print("scanning open tickets...")
+
+    query = (
+        'project = GCPSREOPS AND status in ("Waiting for support", "Waiting for Customer", Pending, "In Progress") '
+        'AND "Path to Green" is not EMPTY AND component = "gcp-platform-warnings"'
+    )
+
+    open_tickets = jira_client.search_issues(query)
+    if not open_tickets:
+        print("no open tickets found!")
+        return True
+
+    print(f"found {len(open_tickets)} open tickets")
+
+    for ticket in open_tickets:
+        ticket_id = ticket.key
+        details = jira_client.issue(ticket_id)
+
+        violation_ids_field = details.fields.customfield_26907
+        project_id_field = details.fields.customfield_36100
+
+        if not violation_ids_field or not project_id_field:
+            continue
+
+        violation_ids = violation_ids_field.strip().split("\n")
+        project_id = project_id_field.strip()
+        inactive_ids = []
+        active_found = False
+
+        for vid in violation_ids:
+            try:
+                raw_id = vid.strip()
+                if raw_id.startswith("instance_"):
+                    instance_id = raw_id.split("instance_")[1]
+                else:
+                    instance_id = raw_id
+                if not instance_exists(project_id, instance_id):
+                    inactive_ids.append(raw_id)
+                else:
+                    active_found = True
+            except Exception as e:
+                print(f"Skipping {vid} due to error: {e}")
+                continue
+
+        if inactive_ids:
+            updated_description, updated_ids = strike_inactive_ids(
+                details.fields.description, violation_ids_field, inactive_ids
+            )
+
+            jira_client.issue(ticket_id).update(fields={
+                "description": updated_description,
+                "customfield_26907": updated_ids
+            })
+
+        if not active_found:
+            print(f"closing ticket {ticket_id}")
+            jira_client.add_comment(ticket_id, "All violations resolved. Closing the ticket.")
+            jira_client.transition_issue(ticket_id, "Resolve this issue", resolution={"name": "Done"})
+
+    return True
+
+if __name__ == "__main__":
+    try:
+        scan_open_tickets()
+        print("GCPSREOPS-alerts-scanner = 0")
+    except Exception as e:
+        print(e)
+        print("GCPSREOPS-alerts-scanner = 1")
+
+
+
+
 import json
 from config import jira_client, bq_client  # adjust import if needed
 
