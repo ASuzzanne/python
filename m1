@@ -1,3 +1,41 @@
+def strike_inactive_ids(description, inactive_ids):
+    print(f"Striking inactive IDs: {inactive_ids}")
+    
+    for v_id in inactive_ids:
+        i1 = description.find(v_id)
+        if i1 == -1:
+            continue  # ID not found
+
+        # Move back a bit to include full context, like "Reference ID:"
+        i1 = max(i1 - 6, 0)
+
+        # Try to find next block start (either en-dash or next "Reference ID:")
+        i2_dash = description.find("\u2013", i1 + 1)
+        i2_ref = description.find("Reference ID:", i1 + 1)
+
+        # Choose the smaller non-negative one or fall back to end of string
+        i2_candidates = [i for i in [i2_dash, i2_ref] if i != -1]
+        i2 = min(i2_candidates) if i2_candidates else len(description)
+
+        # Extract old block
+        old_block = description[i1:i2].strip()
+
+        # Format the replacement
+        struck_block = old_block.replace("\n", "-\r\n-")
+        new_block = f"*{{color:#218845}}RESOLVED{{color}}*\r\n-{struck_block}-"
+
+        # Replace in description
+        description = description.replace(old_block, new_block)
+
+    return description
+
+
+
+
+
+
+
+
 import re
 
 def strike_inactive_ids(description, inactive_ids):
