@@ -1,3 +1,102 @@
+Great — let me show you exactly how to replace your instance_exists logic with resource_exists_for_violation in your current main.py (scan_open_tickets()).
+
+⸻
+
+✅ First: Make sure you have this utility function in common.py or utils.py:
+
+# common.py or utils.py
+
+def resource_exists_for_violation(violation_name, project_id, resource_id):
+    if violation_name == "computeInstanceOlderThan28d":
+        from computeinstanceolder import ComputeInstanceOlderThan28Days
+        return ComputeInstanceOlderThan28Days().resource_exists(project_id, resource_id)
+
+    elif violation_name == "computeImageOlderThanAllowed":
+        from computeimageolder import ComputeImageOlderThanAllowed
+        return ComputeImageOlderThanAllowed().resource_exists(project_id, resource_id)
+
+    # You can add more types here as needed
+    else:
+        return True  # default: assume resource exists to avoid accidental closure
+
+
+⸻
+
+✅ Then: In your main.py, do this:
+
+1. Import the helper:
+
+At the top:
+
+from common import resource_exists_for_violation
+
+
+⸻
+
+2. Replace instance_exists() and its call:
+
+Delete this function from main.py:
+
+def instance_exists(project_id, instance_id):
+    ...
+
+
+⸻
+
+3. In scan_open_tickets(), replace this part:
+
+Before:
+
+if not instance_exists(project_id, instance_id):
+    ...
+
+After:
+
+if not resource_exists_for_violation("computeInstanceOlderThan28d", project_id, instance_id):
+    print(f"Instance {instance_id} is inactive.")
+    inactive_ids.append(vid)
+else:
+    print(f"Instance {instance_id} is active.")
+    active_found = True
+
+This line:
+
+if not instance_exists(project_id, instance_id):
+
+becomes:
+
+if not resource_exists_for_violation("computeInstanceOlderThan28d", project_id, instance_id):
+
+
+⸻
+
+Final Result (snippet):
+
+for vid in violation_ids:
+    try:
+        instance_id = vid.split("instance_")[1]
+        print(f"Checking instance: {instance_id}")
+        if not resource_exists_for_violation("computeInstanceOlderThan28d", project_id, instance_id):
+            print(f"Instance {instance_id} is inactive.")
+            inactive_ids.append(vid)
+        else:
+            print(f"Instance {instance_id} is active.")
+            active_found = True
+    except Exception as e:
+        print(f"Skipping {vid} due to error: {e}")
+        continue
+
+
+⸻
+
+Let me know if you’d like me to review your ComputeInstanceOlderThan28Days class as well to ensure it has the right resource_exists() method.
+
+
+
+
+
+
+
 def strike_inactive_ids(description, inactive_ids):
     print(f"Striking inactive IDs: {inactive_ids}")
     
