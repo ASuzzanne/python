@@ -1,3 +1,26 @@
+import re
+
+def strike_inactive_ids(description, inactive_ids):
+    print(f"Striking inactive IDs: {inactive_ids}")
+    
+    for vid in inactive_ids:
+        # Match the entire block containing the violation for the given instance ID
+        pattern = re.compile(
+            rf"(Reference ID:\s*{re.escape(vid)}.*?)(?=(Reference ID:|$))", re.DOTALL
+        )
+        matches = pattern.findall(description)
+        
+        for match in matches:
+            block = match[0].strip()
+            # Add "- " at the start of each line and enclose in strikethrough
+            struck_block = "\n".join([f"-{line}" for line in block.splitlines()])
+            replacement = f"*{{color:#218845}}RESOLVED{{color}}*\n{struck_block}\n"
+            description = description.replace(block, replacement)
+
+    print(f"Updated description after striking inactive IDs:\n{description}")
+    return description
+
+
 from config import jira_client, bq_client, instance_client
 from google.cloud import compute_v1
 
