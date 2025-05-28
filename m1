@@ -2,6 +2,40 @@ def strike_inactive_ids(description, ids_str, inactive_ids):
     print("\nStriking inactive IDs in description...")
 
     for vid in inactive_ids:
+        search_key = f"Reference ID: {vid}".strip()
+        start = description.find(search_key)
+
+        if start == -1:
+            print(f"ID {vid} not found in description.")
+            continue
+
+        # Try to find the next Reference ID OR the end of the block
+        next_ref_index = description.find("Reference ID:", start + 1)
+        end = next_ref_index if next_ref_index != -1 else len(description)
+
+        # Grab the block that refers to the violation
+        old_block = description[start:end]
+
+        # Strike format
+        struck_block = old_block.strip().replace("\n", "-\r\n-")
+        struck_block = f"(color: #218845) RESOLVED{{color}}*\r\n-{struck_block}-"
+
+        print(f"Striking block for ID {vid}:\n{old_block}")
+
+        # Replace in description
+        description = description.replace(old_block, struck_block)
+
+        # Remove the ID from ids_str (cleaning newline variants)
+        ids_str = ids_str.replace(f"{vid}\n", "").replace(f"\n{vid}", "").replace(vid, "")
+
+    return description, ids_str
+
+
+
+def strike_inactive_ids(description, ids_str, inactive_ids):
+    print("\nStriking inactive IDs in description...")
+
+    for vid in inactive_ids:
         # Find the start of the violation block
         start = description.find("Reference ID: " + vid)
         if start == -1:
