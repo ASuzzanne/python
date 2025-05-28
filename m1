@@ -1,3 +1,33 @@
+def strike_inactive_ids(description, ids_str, inactive_ids):
+    print("\nStriking inactive IDs in description...")
+
+    for vid in inactive_ids:
+        # Find the start of the violation block
+        start = description.find("Reference ID: " + vid)
+        if start == -1:
+            continue  # Skip if ID not found
+
+        # Find the end of the block: next "Reference ID" or end of description
+        next_ref_index = description.find("Reference ID:", start + 1)
+        end = next_ref_index if next_ref_index != -1 else len(description)
+
+        # Extract and format the block
+        old_description = description[start:end]
+        new_description = old_description.strip()
+        new_description = new_description.replace("\n", "-\r\n-")
+        new_description = "(color: #218845) RESOLVED{color}*\r\n-" + new_description + "-"
+
+        # Replace in full description
+        description = description.replace(old_description, new_description)
+
+        # Clean ID from ids_str
+        ids_str = ids_str.replace(vid + "\n", "")
+        ids_str = ids_str.replace(vid, "")
+
+    return (description, ids_str)
+
+
+
 Great — let me show you exactly how to replace your instance_exists logic with resource_exists_for_violation in your current main.py (scan_open_tickets()).
 
 ⸻
