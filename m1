@@ -2,6 +2,41 @@ def strike_inactive_ids(description, ids_str, inactive_ids):
     print("\nStriking inactive IDs in description...")
 
     for vid in inactive_ids:
+        # Normalize vid to match what's in the description (remove "instance_" if present)
+        if vid.startswith("instance_"):
+            vid_clean = vid.replace("instance_", "").strip()
+        else:
+            vid_clean = vid.strip()
+
+        # Match block starting from Reference ID line with this ID
+        # Match until the next Reference ID or end of string
+        pattern = rf"(Reference ID:\s*(?:instance\s*)?{re.escape(vid_clean)}[\s\S]*?)(?=Reference ID:|\Z)"
+
+        match = re.search(pattern, description, re.MULTILINE)
+
+        if match:
+            old_block = match.group(1)
+
+            # Replace line breaks for Jira formatting and wrap it with RESOLVED
+            formatted_block = old_block.strip().replace("\n", "-\r\n-")
+            new_block = "*{color:#218845}RESOLVED{color}*\r\n-" + formatted_block + "-"
+
+            # Replace in description
+            description = description.replace(old_block, new_block)
+
+            # Clean the ID from the list
+            ids_str = ids_str.replace(vid + "\n", "")
+            ids_str = ids_str.replace(vid, "")
+
+        else:
+            print(f"❗ Could not match violation block for ID: {vid}")
+
+    return (description, ids_str)
+
+def strike_inactive_ids(description, ids_str, inactive_ids):
+    print("\nStriking inactive IDs in description...")
+
+    for vid in inactive_ids:
         search_key = f"Reference ID: {vid}".strip()
         start = description.find(search_key)
 
