@@ -1,4 +1,41 @@
 def strike_inactive_ids(description, ids_str, inactive_ids):
+    for vid in inactive_ids:
+        vid_index = description.find(vid)
+        if vid_index == -1:
+            continue
+
+        # Step 1: Find the start of the violation block
+        line_start = description.rfind("\n", 0, vid_index)
+        if line_start == -1:
+            line_start = 0  # start of string if no newline found
+        else:
+            line_start += 1  # move past the newline
+
+        # Step 2: Find the end of the violation block
+        line_end = description.find("\u2013", vid_index)
+        if line_end == -1:
+            line_end = description.find("\n", vid_index)
+        if line_end == -1:
+            line_end = len(description)  # till end of string
+
+        # Step 3: Extract and update that line
+        old_description = description[line_start:line_end]
+        new_description = old_description.strip()
+        new_description = new_description.replace("\n", "-\r\n-")
+        new_description = f"(color: #218845) RESOLVED (color)*\r\n- {new_description}"
+
+        # Step 4: Replace in main description
+        description = description.replace(old_description, new_description)
+
+        # Step 5: Remove this ID from the ID list
+        ids_str = ids_str.replace(vid + "\n", "")
+        ids_str = ids_str.replace(vid, "")
+
+    return description, ids_str
+
+
+
+def strike_inactive_ids(description, ids_str, inactive_ids):
     print("\nStriking inactive IDs in description...")
 
     for vid in inactive_ids:
